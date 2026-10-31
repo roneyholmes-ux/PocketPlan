@@ -294,12 +294,23 @@ def classify(rows, use_ai=False):
             raise ValueError('A IA não concluiu a categorização. Verifique a chave, o modelo e os créditos, ou importe com regras locais.')
     return rows
 
+def merchant_key(description):
+    text = normalize(description)
+    text = re.sub(r'\(?parcela\s+\d+\s*(?:de|/)\s*\d+\)?', '', text)
+    return ' '.join(text.split()).strip()
+
+
+def remember(con, description, category):
+    con.execute('INSERT OR REPLACE INTO category_memory VALUES (?,?)', (merchant_key(description), category))
+
+
 @contextmanager
 def connect():
     DB.parent.mkdir(exist_ok=True)
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     con.execute('CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, date TEXT, description TEXT, cents INTEGER, category TEXT, source TEXT, file_hash TEXT)')
+    con.execute('CREATE TABLE IF NOT EXISTS category_memory (merchant TEXT PRIMARY KEY, category TEXT NOT NULL)')
     con.execute('CREATE TABLE IF NOT EXISTS imports (hash TEXT PRIMARY KEY)')
     if 'statement_month' not in [r[1] for r in con.execute('PRAGMA table_info(imports)')]:
         con.execute('ALTER TABLE imports ADD COLUMN statement_month TEXT')
@@ -365,7 +376,14 @@ class Handler(BaseHTTPRequestHandler):
                 rows = parse_file(data['name'], raw, password, metadata)
                 if not rows or len(rows) > 2000:
                     raise ValueError('Importe entre 1 e 2.000 lançamentos por vez.')
-                rows = classify(rows, data.get('ai') is True)
+                with connect() as con:
+                    memory = dict(con.execute('SELECT merchant, category FROM category_memory'))
+                unknown = [r for r in rows if merchant_key(r['description']) not in memory]
+                classify(unknown, data.get('ai') is True)
+                for row in rows:
+                    key = merchant_key(row['description'])
+                    if key in memory:
+                        row.update(category=memory[key], source='Sua preferência')
                 return self.send({'rows': rows, 'hash': digest, 'file_name': re.split(r'[/\\]', data['name'])[-1][:200], 'statement_month': metadata.get('statement_month') or '', 'warning': metadata.get('warning', '')})
             if self.path == '/api/import':
                 rows, digest = data['rows'], data['hash']
@@ -378,6 +396,16 @@ class Handler(BaseHTTPRequestHandler):
                         if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
                             raise ValueError('Lançamento inválido.')
                         con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
+                        if row.get('category_corrected'):
+                            remember(con, row['description'], row['category'])
+                return self.send({'ok': True})
+            if self.path == '/api/delete-month':
+                if 'statement_month' not in data:
+                    raise ValueError('Selecione um mês.')
+                month = valid_month(data['statement_month'], allow_empty=True)
+                with connect() as con:
+                    con.execute('DELETE FROM expenses WHERE file_hash IN (SELECT hash FROM imports WHERE statement_month IS ?)', (month,))
+                    con.execute('DELETE FROM imports WHERE statement_month IS ?', (month,))
                 return self.send({'ok': True})
             if self.path == '/api/statement-month':
                 month = valid_month(data.get('statement_month'), allow_empty=True)
@@ -393,6 +421,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(data['ids'], list) or len(data['ids']) > 2000:
                     raise ValueError('Seleção inválida.')
                 with connect() as con:
+                    for expense_id in data['ids']:
+                        row = con.execute('SELECT description FROM expenses WHERE id=?', (expense_id,)).fetchone()
+                        if row:
+                            remember(con, row['description'], data['category'])
                     con.executemany("UPDATE expenses SET category=?, source='Manual' WHERE id=?", [(data['category'], i) for i in data['ids']])
                 return self.send({'ok': True})
             return self.send({'error': 'Não encontrado.'}, 404)

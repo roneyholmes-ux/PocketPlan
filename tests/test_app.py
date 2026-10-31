@@ -166,6 +166,18 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 409)
                 error.exception.close()
                 self.assertEqual(len(call('expenses')['rows']), 2)
+                future = call('preview', {'name': 'future.csv', 'content': base64.b64encode(raw.replace(b'01/10', b'01/11')).decode()})
+                self.assertTrue(all(r['category']=='Casa' and r['source']=='Sua preferência' for r in future['rows']))
+                future['statement_month']='2026-11'
+                call('import', future)
+                call('delete-month', {'statement_month': None})
+                remaining=call('expenses')
+                self.assertEqual(len(remaining['rows']), 2)
+                self.assertTrue(all(r['statement_month']=='2026-11' for r in remaining['rows']))
+                self.assertEqual(len(remaining['imports']), 1)
+                call('import', preview)
+                self.assertEqual(len(call('expenses')['rows']), 4)
+
             finally:
                 server.shutdown(); server.server_close(); thread.join()
 
