@@ -123,7 +123,12 @@ def parse_inter_text(text):
         raise ValueError('A soma das compras difere do total da fatura. Pode haver antecipações, saldo ou encargos que precisam de tratamento específico.')
     return result
 
-def parse_pdf(raw, password=''):
+def valid_month(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', value) or value.startswith('0000'):
+        raise ValueError('Informe o mês e o ano da fatura.')
+    return value
+
+def parse_pdf(raw, password='', metadata=None):
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -144,6 +149,10 @@ def parse_pdf(raw, password=''):
         raise ValueError('Não foi possível ler esse PDF.')
     if not text.strip():
         raise ValueError('Este PDF parece digitalizado. Exporte uma fatura com texto selecionável; OCR ainda não está disponível.')
+    if metadata is not None:
+        due = re.search(r'Data de Vencimento\s+(\d{2}/\d{2}/\d{4})', text, re.I)
+        if due:
+            metadata['statement_month'] = date_iso(due[1])[:7]
     if 'bancointer.com.br' in text.lower() and 'Despesas da fatura' in text:
         return parse_inter_text(text)
     # Require a complete date. Never guess the statement year or silently discard lines.
@@ -160,10 +169,10 @@ def parse_pdf(raw, password=''):
         raise ValueError('O layout deste PDF ainda não é compatível. Informe o banco para adaptar o leitor, ou use CSV com Data, Descrição e Valor.')
     return result
 
-def parse_file(name, raw, password=''):
+def parse_file(name, raw, password='', metadata=None):
     suffix = Path(name).suffix.lower()
     if suffix == '.pdf':
-        return parse_pdf(raw, password)
+        return parse_pdf(raw, password, metadata)
     if suffix == '.csv':
         try:
             text = raw.decode('utf-8-sig')
@@ -224,6 +233,8 @@ def connect():
     con.row_factory = sqlite3.Row
     con.execute('CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, date TEXT, description TEXT, cents INTEGER, category TEXT, source TEXT, file_hash TEXT)')
     con.execute('CREATE TABLE IF NOT EXISTS imports (hash TEXT PRIMARY KEY)')
+    if 'statement_month' not in [r[1] for r in con.execute('PRAGMA table_info(imports)')]:
+        con.execute('ALTER TABLE imports ADD COLUMN statement_month TEXT')
     try:
         with con:
             yield con
@@ -245,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/api/expenses':
             with connect() as con:
-                rows = [dict(r) for r in con.execute('SELECT * FROM expenses ORDER BY date DESC, id')]
+                rows = [dict(r) for r in con.execute('SELECT e.*, i.statement_month FROM expenses e LEFT JOIN imports i ON i.hash=e.file_hash ORDER BY e.date DESC, e.id')]
             return self.send({'rows': rows, 'ai': bool(os.environ.get('OPENAI_API_KEY'))})
         paths = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if self.path not in paths:
@@ -279,21 +290,31 @@ class Handler(BaseHTTPRequestHandler):
                 password = data.get('password', '')
                 if not isinstance(password, str) or len(password) > 256:
                     raise ValueError('Senha inválida.')
-                rows = parse_file(data['name'], raw, password)
+                metadata = {}
+                rows = parse_file(data['name'], raw, password, metadata)
                 if not rows or len(rows) > 2000:
                     raise ValueError('Importe entre 1 e 2.000 lançamentos por vez.')
                 rows = classify(rows, data.get('ai') is True)
-                return self.send({'rows': rows, 'hash': digest})
+                return self.send({'rows': rows, 'hash': digest, 'statement_month': metadata.get('statement_month', '')})
             if self.path == '/api/import':
                 rows, digest = data['rows'], data['hash']
+                month = valid_month(data.get('statement_month'))
                 if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest) or not 0 < len(rows) <= 2000:
                     raise ValueError('Importação inválida.')
                 with connect() as con:
-                    con.execute('INSERT INTO imports VALUES (?)', (digest,))
+                    con.execute('INSERT INTO imports (hash, statement_month) VALUES (?,?)', (digest, month))
                     for i, row in enumerate(rows):
                         if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
                             raise ValueError('Lançamento inválido.')
                         con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
+                return self.send({'ok': True})
+            if self.path == '/api/statement-month':
+                month = valid_month(data.get('statement_month'))
+                hashes = data.get('hashes')
+                if not isinstance(hashes, list) or not hashes or len(hashes) > 2000 or any(not isinstance(h, str) or not re.fullmatch('[a-f0-9]{64}', h) for h in hashes):
+                    raise ValueError('Selecione uma fatura válida.')
+                with connect() as con:
+                    con.executemany('UPDATE imports SET statement_month=? WHERE hash=?', [(month, h) for h in hashes])
                 return self.send({'ok': True})
             if self.path == '/api/category':
                 if data['category'] not in CATEGORIES + [PENDING]:

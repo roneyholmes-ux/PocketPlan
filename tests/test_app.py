@@ -91,6 +91,17 @@ LOJA TESTE (Parcela 03 de 03) R$ 100,00'''
             self.assertEqual(rows[0]['source'], 'IA')
 
 class ApiTests(unittest.TestCase):
+    def test_old_database_migration(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, 'DB', Path(tmp)/'old.sqlite3'):
+            con = app.sqlite3.connect(app.DB)
+            con.execute('CREATE TABLE imports (hash TEXT PRIMARY KEY)')
+            con.execute('INSERT INTO imports VALUES (?)', ('a'*64,))
+            con.commit(); con.close()
+            with app.connect() as con:
+                self.assertIsNone(con.execute('SELECT statement_month FROM imports').fetchone()[0])
+            with app.connect() as con:
+                self.assertEqual(con.execute('SELECT COUNT(*) FROM imports').fetchone()[0], 1)
+
     def test_preview_confirm_duplicate_bulk_and_persistence(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(app, 'DB', Path(tmp)/'db.sqlite3'):
             server = app.HTTPServer(('127.0.0.1', 0), app.Handler)
@@ -104,8 +115,12 @@ class ApiTests(unittest.TestCase):
                 raw = b'Data;Descricao;Valor\n01/10/2026;Cinema;48,00\n02/10/2026;Mercado;20,00'
                 preview = call('preview', {'name': 'f.csv', 'content': base64.b64encode(raw).decode()})
                 self.assertEqual(call('expenses')['rows'], [])
+                preview['statement_month'] = '2026-11'
                 call('import', preview)
                 rows = call('expenses')['rows']; self.assertEqual(len(rows), 2)
+                self.assertTrue(all(r['statement_month']=='2026-11' and r['date'].startswith('2026-10') for r in rows))
+                call('statement-month', {'hashes': [preview['hash']], 'statement_month': '2026-12'})
+                self.assertTrue(all(r['statement_month']=='2026-12' for r in call('expenses')['rows']))
                 call('category', {'ids': [r['id'] for r in rows], 'category': 'Casa'})
                 self.assertTrue(all(r['category']=='Casa' and r['source']=='Manual' for r in call('expenses')['rows']))
                 with self.assertRaises(HTTPError) as error:
