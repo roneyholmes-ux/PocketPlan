@@ -6,7 +6,7 @@ if not exist ".venv\Scripts\python.exe" (
   python -m venv .venv
   if errorlevel 1 goto erro
 )
-".venv\Scripts\python.exe" -c "import pypdf, openpyxl, cryptography" >nul 2>&1
+".venv\Scripts\python.exe" -c "import pypdf, openpyxl, cryptography, rapidocr, onnxruntime, PIL" >nul 2>&1
 if errorlevel 1 (
   echo Preparando o PocketPlan para o primeiro uso...
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt

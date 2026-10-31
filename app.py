@@ -123,10 +123,63 @@ def parse_inter_text(text):
         raise ValueError('A soma das compras difere do total da fatura. Pode haver antecipações, saldo ou encargos que precisam de tratamento específico.')
     return result
 
-def valid_month(value):
+def valid_month(value, allow_empty=False):
+    if allow_empty and (value is None or value == ''):
+        return None
+    if isinstance(value, str) and re.fullmatch(r'(0[1-9]|1[0-2])/\d{4}', value):
+        value = value[3:] + '-' + value[:2]
     if not isinstance(value, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', value) or value.startswith('0000'):
         raise ValueError('Informe o mês e o ano da fatura.')
     return value
+
+def detect_statement_month(text):
+    """Use explicit statement/due labels, never purchase dates or today's date."""
+    text = normalize(text)
+    candidates = []
+    for pattern in [r'(?:mes (?:da |de )?(?:fatura|referencia)|fatura(?: (?:de|referente a))?|competencia|referencia)\s*[:;\-]?\s*(0[1-9]|1[0-2])/(\d{4})\b']:
+        candidates.extend(year + '-' + month for month, year in re.findall(pattern, text))
+    if candidates:
+        return candidates[0] if len(set(candidates)) == 1 else None
+    # Prefer the due date over issue or closing dates.
+    due = re.findall(r'(?:data de )?vencimento\s*[:;\-]?\s*(\d{2}/\d{2}/\d{4})', text)
+    if due:
+        try:
+            months = {date_iso(d)[:7] for d in due}
+            return months.pop() if len(months) == 1 else None
+        except ValueError:
+            return None
+    named = re.findall(r'(?:fatura(?: de)?|competencia|referencia)\s*[:;\-]?\s*(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s*(?:de|/)?\s*(\d{4})', text)
+    month_names = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
+    months = {f'{year}-{month_names.index(name)+1:02d}' for name, year in named}
+    return months.pop() if len(months) == 1 else None
+
+def parse_image_text(text):
+    """Conservative image-row parser; ambiguous/partial dates are not guessed."""
+    rows = []
+    named_months = {m: i for i, m in enumerate(['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'], 1)}
+    for line in text.splitlines():
+        line = re.sub(r'\s+', ' ', line).strip()
+        named = re.match(r'^(\d{2}) de ([a-zç]{3})\.? (\d{4})\s+', line, re.I)
+        if named:
+            day, month, year = named.groups()
+            if normalize(month) not in named_months:
+                continue
+            line = f'{day}/{named_months[normalize(month)]:02d}/{year} ' + line[named.end():]
+        match = re.fullmatch(r'(\d{2}/\d{2}(?:/(?:\d{4}|\d{2}))?)\s+(.+?)\s+(?:R\$\s*)?([+-]?\s*\d[\d.]*,\d{2})', line)
+        if not match:
+            continue
+        date, description, amount = match.groups()
+        label = normalize(description)
+        if any(word in label for word in ['pagamento', 'total da fatura', 'saldo anterior', 'vencimento']):
+            continue
+        # Inter's dash is a beneficiary placeholder, not a negative amount.
+        credit = amount.strip().startswith('+') or bool(re.search(r'\+\s*(?:R\$)?$', description)) or label.startswith('estorno')
+        description = re.sub(r'\s+(?:-\s*)?\+?\s*(?:R\$)?$', '', description).strip()
+        cents = -abs(money(amount)) if credit else money(amount)
+        rows.append({'date': date_iso(date) if date.count('/') == 2 else '', 'description': description[:300], 'cents': cents})
+    if not rows:
+        raise ValueError('Não foram encontrados lançamentos com data completa, descrição e valor. Envie uma imagem nítida com as linhas completas ou use o PDF original.')
+    return rows
 
 def parse_pdf(raw, password='', metadata=None):
     try:
@@ -150,9 +203,7 @@ def parse_pdf(raw, password='', metadata=None):
     if not text.strip():
         raise ValueError('Este PDF parece digitalizado. Exporte uma fatura com texto selecionável; OCR ainda não está disponível.')
     if metadata is not None:
-        due = re.search(r'Data de Vencimento\s+(\d{2}/\d{2}/\d{4})', text, re.I)
-        if due:
-            metadata['statement_month'] = date_iso(due[1])[:7]
+        metadata['statement_month'] = detect_statement_month(text)
     if 'bancointer.com.br' in text.lower() and 'Despesas da fatura' in text:
         return parse_inter_text(text)
     # Require a complete date. Never guess the statement year or silently discard lines.
@@ -171,6 +222,13 @@ def parse_pdf(raw, password='', metadata=None):
 
 def parse_file(name, raw, password='', metadata=None):
     suffix = Path(name).suffix.lower()
+    if suffix in ['.png', '.jpg', '.jpeg', '.webp']:
+        from ocr_reader import read_image_text
+        text = read_image_text(raw)
+        if metadata is not None:
+            metadata['statement_month'] = detect_statement_month(text)
+            metadata['warning'] = 'Imagem lida por reconhecimento de texto. Confira datas, descrições, valores e linhas ausentes antes de salvar.'
+        return parse_image_text(text)
     if suffix == '.pdf':
         return parse_pdf(raw, password, metadata)
     if suffix == '.csv':
@@ -179,10 +237,17 @@ def parse_file(name, raw, password='', metadata=None):
         except UnicodeDecodeError:
             text = raw.decode('cp1252')
         try:
-            dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t')
+            header_line = re.search(r'(?im)^(?:data|date|data da compra)[,;\t]', text)
+            sample = text[header_line.start():] if header_line else text
+            dialect = csv.Sniffer().sniff(sample[:4096], delimiters=',;\t')
         except csv.Error:
             raise ValueError('Não foi possível identificar as colunas do CSV.')
-        return parse_table(list(csv.reader(io.StringIO(text), dialect)))
+        table = list(csv.reader(io.StringIO(text), dialect))
+        if metadata is not None:
+            metadata['statement_month'] = detect_statement_month(text)
+        # Allow explicit statement metadata before the header.
+        header = next((i for i, row in enumerate(table) if row and normalize(row[0]) in ['data', 'date', 'data da compra']), 0)
+        return parse_table(table[header:])
     if suffix == '.xlsx':
         try:
             from openpyxl import load_workbook
@@ -191,10 +256,13 @@ def parse_file(name, raw, password='', metadata=None):
         book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
         try:
             rows = [[v.strftime('%Y-%m-%d') if isinstance(v, datetime) else (v if v is not None else '') for v in row] for row in book.active.iter_rows(values_only=True)]
-            return parse_table(rows)
+            if metadata is not None:
+                metadata['statement_month'] = detect_statement_month('\n'.join(';'.join(map(str, row)) for row in rows))
+            header = next((i for i, row in enumerate(rows) if row and normalize(row[0]) in ['data', 'date', 'data da compra']), 0)
+            return parse_table(rows[header:])
         finally:
             book.close()
-    raise ValueError('Escolha um arquivo PDF, CSV ou XLSX.')
+    raise ValueError('Escolha PDF, CSV, XLSX ou uma imagem PNG, JPG ou WebP.')
 
 def classify(rows, use_ai=False):
     for row in rows:
@@ -235,6 +303,8 @@ def connect():
     con.execute('CREATE TABLE IF NOT EXISTS imports (hash TEXT PRIMARY KEY)')
     if 'statement_month' not in [r[1] for r in con.execute('PRAGMA table_info(imports)')]:
         con.execute('ALTER TABLE imports ADD COLUMN statement_month TEXT')
+    if 'file_name' not in [r[1] for r in con.execute('PRAGMA table_info(imports)')]:
+        con.execute('ALTER TABLE imports ADD COLUMN file_name TEXT')
     try:
         with con:
             yield con
@@ -257,8 +327,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/api/expenses':
             with connect() as con:
                 rows = [dict(r) for r in con.execute('SELECT e.*, i.statement_month FROM expenses e LEFT JOIN imports i ON i.hash=e.file_hash ORDER BY e.date DESC, e.id')]
-            return self.send({'rows': rows, 'ai': bool(os.environ.get('OPENAI_API_KEY'))})
-        paths = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+                imports = [dict(r) for r in con.execute('SELECT hash, statement_month, file_name FROM imports ORDER BY statement_month DESC, rowid DESC')]
+            return self.send({'rows': rows, 'imports': imports, 'ai': bool(os.environ.get('OPENAI_API_KEY'))})
+        paths = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/filters.js': ('filters.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if self.path not in paths:
             return self.send({'error': 'Não encontrado.'}, 404)
         filename, mime = paths[self.path]
@@ -295,21 +366,21 @@ class Handler(BaseHTTPRequestHandler):
                 if not rows or len(rows) > 2000:
                     raise ValueError('Importe entre 1 e 2.000 lançamentos por vez.')
                 rows = classify(rows, data.get('ai') is True)
-                return self.send({'rows': rows, 'hash': digest, 'statement_month': metadata.get('statement_month', '')})
+                return self.send({'rows': rows, 'hash': digest, 'file_name': re.split(r'[/\\]', data['name'])[-1][:200], 'statement_month': metadata.get('statement_month') or '', 'warning': metadata.get('warning', '')})
             if self.path == '/api/import':
                 rows, digest = data['rows'], data['hash']
-                month = valid_month(data.get('statement_month'))
+                month = valid_month(data.get('statement_month'), allow_empty=True)
                 if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest) or not 0 < len(rows) <= 2000:
                     raise ValueError('Importação inválida.')
                 with connect() as con:
-                    con.execute('INSERT INTO imports (hash, statement_month) VALUES (?,?)', (digest, month))
+                    con.execute('INSERT INTO imports (hash, statement_month, file_name) VALUES (?,?,?)', (digest, month, str(data.get('file_name', 'Fatura importada'))[:200]))
                     for i, row in enumerate(rows):
                         if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
                             raise ValueError('Lançamento inválido.')
                         con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
                 return self.send({'ok': True})
             if self.path == '/api/statement-month':
-                month = valid_month(data.get('statement_month'))
+                month = valid_month(data.get('statement_month'), allow_empty=True)
                 hashes = data.get('hashes')
                 if not isinstance(hashes, list) or not hashes or len(hashes) > 2000 or any(not isinstance(h, str) or not re.fullmatch('[a-f0-9]{64}', h) for h in hashes):
                     raise ValueError('Selecione uma fatura válida.')

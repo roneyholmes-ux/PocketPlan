@@ -76,6 +76,42 @@ LOJA TESTE (Parcela 03 de 03) R$ 100,00'''
         with self.assertRaisesRegex(ValueError, 'não foi reconhecida'):
             app.parse_inter_text(text.replace('R$ 30,00\nTotal', 'USD 30,00\nTotal'))
 
+    def test_statement_month_detection(self):
+        self.assertEqual(app.detect_statement_month('Fatura: 10/2026'), '2026-10')
+        self.assertEqual(app.detect_statement_month('Referência: outubro de 2026'), '2026-10')
+        self.assertEqual(app.detect_statement_month('Data de Vencimento\n07/10/2026'), '2026-10')
+        self.assertIsNone(app.detect_statement_month('01/10/2026 Supermercado 50,00'))
+        self.assertIsNone(app.detect_statement_month('Fatura: 10/2026 Fatura: 11/2026'))
+        self.assertIsNone(app.valid_month('', allow_empty=True))
+        self.assertEqual(app.valid_month('10/2026'), '2026-10')
+        with self.assertRaises(ValueError): app.valid_month('13/2026')
+        meta = {}
+        app.parse_file('f.csv', b'Fatura;10/2026\nData;Descricao;Valor\n01/09/2026;Mercado;50,00', metadata=meta)
+        self.assertEqual(meta['statement_month'], '2026-10')
+
+    def test_image_rows_and_partial_dates(self):
+        rows = app.parse_image_text('01/10/2026 Mercado R$ 100,00\n02/10/2026 Estorno - + R$ 10,00\n03/10/2026 PAGAMENTO ON LINE - + R$ 500,00\n04/10 Cinema R$ 50,00')
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]['cents'], -1000)
+        self.assertEqual(rows[2]['date'], '')
+
+    def test_image_ocr_end_to_end(self):
+        from PIL import Image, ImageDraw, ImageFont
+        font_path = Path('C:/Windows/Fonts/arial.ttf')
+        if not font_path.exists():
+            self.skipTest('Fonte de teste disponível no Windows')
+        image = Image.new('RGB', (1400, 400), 'white')
+        draw = ImageDraw.Draw(image); font = ImageFont.truetype(str(font_path), 36)
+        for i, text in enumerate(['Fatura: 10/2026', '01/10/2026 Mercado Teste R$ 123,45', '02/10/2026 Cinema R$ 50,00']):
+            draw.text((40, 40+i*100), text, fill='black', font=font)
+        raw = io.BytesIO(); image.save(raw, format='PNG')
+        metadata = {}
+        rows = app.parse_file('teste.png', raw.getvalue(), metadata=metadata)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sum(r['cents'] for r in rows), 17345)
+        self.assertEqual(metadata['statement_month'], '2026-10')
+        self.assertIn('Imagem', metadata['warning'])
+
     def test_xlsx(self):
         from openpyxl import Workbook
         book = Workbook(); sheet = book.active
@@ -115,12 +151,14 @@ class ApiTests(unittest.TestCase):
                 raw = b'Data;Descricao;Valor\n01/10/2026;Cinema;48,00\n02/10/2026;Mercado;20,00'
                 preview = call('preview', {'name': 'f.csv', 'content': base64.b64encode(raw).decode()})
                 self.assertEqual(call('expenses')['rows'], [])
-                preview['statement_month'] = '2026-11'
+                preview['statement_month'] = None
                 call('import', preview)
                 rows = call('expenses')['rows']; self.assertEqual(len(rows), 2)
-                self.assertTrue(all(r['statement_month']=='2026-11' and r['date'].startswith('2026-10') for r in rows))
+                self.assertTrue(all(r['statement_month'] is None and r['date'].startswith('2026-10') for r in rows))
                 call('statement-month', {'hashes': [preview['hash']], 'statement_month': '2026-12'})
                 self.assertTrue(all(r['statement_month']=='2026-12' for r in call('expenses')['rows']))
+                call('statement-month', {'hashes': [preview['hash']], 'statement_month': ''})
+                self.assertTrue(all(r['statement_month'] is None for r in call('expenses')['rows']))
                 call('category', {'ids': [r['id'] for r in rows], 'category': 'Casa'})
                 self.assertTrue(all(r['category']=='Casa' and r['source']=='Manual' for r in call('expenses')['rows']))
                 with self.assertRaises(HTTPError) as error:

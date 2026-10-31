@@ -6,4 +6,8 @@ __pycache__/
 *.pdf
 *.xlsx
 *.csv
+*.png
+*.jpg
+*.jpeg
+*.webp
 !exemplo.csv
