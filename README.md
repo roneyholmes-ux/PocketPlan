@@ -4,6 +4,12 @@ Um app simples para acompanhar as despesas da casa. Importe sua fatura, confira 
 
 ## Começar no Windows
 
+O endereço `http://127.0.0.1:8000` é local: ele só funciona neste computador enquanto o PocketPlan está em execução. A página do GitHub guarda o código e não inicia o aplicativo.
+
+Para abrir com dois cliques, instale Python 3.11 ou superior, baixe e extraia o projeto em uma pasta e abra **Iniciar PocketPlan.cmd**. No primeiro uso é preciso conexão com a internet para instalar as bibliotecas. O navegador abrirá automaticamente. Mantenha a janela do PocketPlan aberta enquanto usar; para encerrar, pressione Ctrl+C nessa janela. Nas próximas vezes, abra o mesmo arquivo novamente.
+
+Se preferir iniciar pelo terminal:
+
 Instale Python 3.11 ou superior. Na pasta do projeto, abra o terminal e execute:
 
 ```powershell

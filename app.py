@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
+import threading
+import webbrowser
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -311,4 +314,16 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '8000'))
     print(f'PocketPlan: http://127.0.0.1:{port}', flush=True)
-    HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+    try:
+        server = HTTPServer(('127.0.0.1', port), Handler)
+    except OSError:
+        print(f'Não foi possível usar a porta {port}. Verifique se o PocketPlan já está aberto ou escolha outra porta com PORT.', flush=True)
+        sys.exit(1)
+    if '--open' in sys.argv:
+        threading.Timer(0.5, lambda: webbrowser.open(f'http://127.0.0.1:{port}')).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
