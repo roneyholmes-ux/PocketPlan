@@ -23,7 +23,7 @@ function visible(){return rows.filter(r=>(!$('filter').value||r.category===$('fi
 document.querySelectorAll('[data-sort]').forEach(button=>{button.onclick=()=>{sortDirection=sortKey===button.dataset.sort?-sortDirection:1;sortKey=button.dataset.sort;render();};});
 async function load(){const state=await api('expenses');rows=state.rows;imports=state.imports||[];$('ai').disabled=!state.ai;$('ai').checked=state.ai;$('aiStatus').textContent=state.ai?'configurada':'não configurada — regras locais disponíveis';if(activeMonth&&activeMonth!=='unassigned'&&!rows.some(r=>r.statement_month===activeMonth))activeMonth='';renderMonths();render();}
 function render(){const list=visible(),total=list.reduce((s,r)=>s+r.cents,0);$('statementTitle').textContent=monthName(activeMonth);document.querySelectorAll('[data-sort]').forEach(b=>{const active=b.dataset.sort===sortKey;b.querySelector('span').textContent=active?(sortDirection===1?'↑':'↓'):'↕';b.parentElement.setAttribute('aria-sort',active?(sortDirection===1?'ascending':'descending'):'none');});drawPie(list);drawCalendar(list);$('total').textContent=brl(total);$('count').textContent=list.length+' lançamentos no período';$('cards').replaceChildren();cats.forEach((c,i)=>{const items=list.filter(r=>r.category===c);const card=el('article',undefined,'card');const label=el('span');const dot=el('i',undefined,'dot');dot.style.background=dots[i];label.append(dot,document.createTextNode(c));card.append(label,el('strong',brl(items.reduce((s,r)=>s+r.cents,0))),el('small',items.length+' lançamentos'));$('cards').append(card);});$('rows').replaceChildren();list.forEach(r=>{const tr=el('tr');const td=el('td');const check=el('input');check.type='checkbox';check.checked=selected.has(r.id);check.setAttribute('aria-label','Selecionar '+r.description);check.onchange=()=>{check.checked?selected.add(r.id):selected.delete(r.id);render();};td.append(check);const category=el('td');category.append(categorySelect(r.category,async c=>{try{await api('category',{ids:[r.id],category:c});await load();toast('Categoria atualizada.');}catch(e){toast(e.message);render();}}),el('span',r.source,'source'));tr.append(td,el('td',fmtDate(r.date)),el('td',r.description),el('td',brl(r.cents),'amount'),category);$('rows').append(tr);});$('empty').hidden=list.length>0;$('empty').querySelector('h3').textContent=rows.length?'Nenhuma despesa neste filtro':'Sua organização começa com uma fatura';$('empty').querySelector('p').hidden=rows.length>0;$('first').hidden=rows.length>0;$('demo').hidden=rows.length>0;$('review').textContent=list.filter(r=>r.category==='A revisar').length+' a revisar';$('bulk').hidden=!selected.size;$('selected').textContent=selected.size+' selecionadas';$('all').checked=list.length>0&&list.every(r=>selected.has(r.id));$('all').indeterminate=list.some(r=>selected.has(r.id))&&!$('all').checked;}
-options($('filter'),cats);options($('bulkCategory'),cats);
+options($('calendarFilter'),cats);options($('filter'),cats);options($('bulkCategory'),cats);
 $('filter').onchange=()=>{selected.clear();render();};
 $('all').onchange=()=>{visible().forEach(r=>$('all').checked?selected.add(r.id):selected.delete(r.id));render();};
 $('clear').onclick=()=>{selected.clear();render();};
@@ -46,7 +46,7 @@ $('deleteMonth').onclick=async()=>{const count=rows.filter(r=>editingMonth==='un
 load().catch(e=>toast(e.message));
 
 function drawCalendar(list){
-  $('calendarCategory').textContent=$('filter').value||'Todas as categorias';
+  list=rows.filter(r=>(!activeMonth||(activeMonth==='unassigned'?!r.statement_month:r.statement_month===activeMonth))&&(!$('calendarFilter').value||r.category===$('calendarFilter').value));
   let month=$('calendarMonth').value;
   if(!month){month=(activeMonth&&activeMonth!=='unassigned'?activeMonth:[...rows].map(r=>r.date.slice(0,7)).sort().pop())||new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');$('calendarMonth').value=month;}
   const data=PocketFilters.calendar(list,month),grid=$('calendarDays');grid.replaceChildren();if(!data)return;
@@ -59,3 +59,5 @@ function drawCalendar(list){
   $('calendarNote').textContent='Pela data original da compra, sem descontar estornos.'+(data.outside?' '+brl(data.outside)+' das compras selecionadas têm datas em outros meses.':'');
 }
 $('calendarMonth').onchange=()=>drawCalendar(visible());
+
+$('calendarFilter').onchange=()=>drawCalendar();

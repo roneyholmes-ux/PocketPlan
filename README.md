@@ -33,7 +33,7 @@ Categorias: **Lazer, Mercado, Despesa Médica e Casa**. **A revisar** é uma ind
 
 ## Calendário de gastos
 
-À direita, o calendário soma as compras positivas por dia, usando a data original. Selecione uma categoria para ver apenas esse tipo de gasto: as cores e a escala são recalculadas para o filtro escolhido. Cinza indica zero; verde claro a escuro indica valores crescentes em cinco faixas proporcionais ao maior total diário exibido. Clique em um dia para consultar seu total. Estornos não entram nas cores.
+À direita, o calendário soma as compras positivas por dia, usando a data original. Use **Tipo de gasto** no próprio calendário para escolher a categoria. Esse filtro é independente do filtro da tabela: altera apenas os dias e a escala de cores do calendário. Cinza indica zero; verde claro a escuro indica valores crescentes em cinco faixas proporcionais ao maior total diário exibido. Clique em um dia para consultar seu total. Estornos não entram nas cores.
 
 O calendário acompanha o mês selecionado na lateral; seu seletor permite consultar outros meses das compras da seleção, incluindo parcelas antigas. Valores com datas fora do calendário são informados abaixo.
 
