@@ -31,6 +31,12 @@ Abra **http://127.0.0.1:8000** no navegador. Para encerrar, pressione Ctrl+C no 
 
 Categorias: **Lazer, Mercado, Despesa Médica e Casa**. **A revisar** é uma indicação de dúvida, para não forçar uma classificação incorreta. Créditos e estornos aparecem negativos e reduzem o total. O mesmo arquivo não pode ser importado novamente; arquivos diferentes que contenham as mesmas compras exigem conferência para evitar duplicação.
 
+## Calendário de gastos
+
+À direita, o calendário soma as compras positivas por dia, usando a data original. Selecione uma categoria para ver apenas esse tipo de gasto: as cores e a escala são recalculadas para o filtro escolhido. Cinza indica zero; verde claro a escuro indica valores crescentes em cinco faixas proporcionais ao maior total diário exibido. Clique em um dia para consultar seu total. Estornos não entram nas cores.
+
+O calendário acompanha o mês selecionado na lateral; seu seletor permite consultar outros meses das compras da seleção, incluindo parcelas antigas. Valores com datas fora do calendário são informados abaixo.
+
 ## Mês da fatura
 
 Escolha o mês e o ano no seletor da tela de upload. Essa escolha define onde os lançamentos serão guardados, independentemente das datas das compras.

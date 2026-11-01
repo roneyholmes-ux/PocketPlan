@@ -26,7 +26,15 @@
     }[f.sort]||((a,b)=>b.date.localeCompare(a.date));
     return result.sort(sort);
   }
-  const api={cents,filterRows};
+  function calendar(rows, month){
+    if(!/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(month))return null;
+    const [year,m]=month.split('-').map(Number);
+    const days=Array(new Date(Date.UTC(year,m,0)).getUTCDate()).fill(0);
+    let outside=0;
+    rows.forEach(r=>{if(r.cents<=0)return;if(r.date.slice(0,7)!==month){outside+=r.cents;return;}const day=Number(r.date.slice(8,10));if(day>=1&&day<=days.length)days[day-1]+=r.cents;});
+    return {days,offset:new Date(Date.UTC(year,m-1,1)).getUTCDay(),max:Math.max(0,...days),outside};
+  }
+  const api={cents,filterRows,calendar};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PocketFilters=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
