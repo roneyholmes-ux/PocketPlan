@@ -177,6 +177,22 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(len(remaining['imports']), 1)
                 call('import', preview)
                 self.assertEqual(len(call('expenses')['rows']), 4)
+                first = {**preview, 'hash': 'b'*64, 'statement_month': '2026-10'}
+                second = {**preview, 'hash': 'c'*64, 'statement_month': '2026-10'}
+                invalid = {**second, 'rows': [{**second['rows'][0], 'category': 'invalid'}]}
+                with self.assertRaises(HTTPError) as batch_error:
+                    call('import-batch', {'files': [first, invalid]})
+                self.assertEqual(batch_error.exception.code, 400)
+                batch_error.exception.close()
+                self.assertEqual(len(call('expenses')['rows']), 4)
+                call('import-batch', {'files': [first, second]})
+                self.assertEqual(len(call('expenses')['rows']), 8)
+                with self.assertRaises(HTTPError) as duplicate_batch:
+                    call('import-batch', {'files': [{**first, 'hash': 'd'*64}, second]})
+                self.assertEqual(duplicate_batch.exception.code, 409)
+                duplicate_batch.exception.close()
+                self.assertEqual(len(call('expenses')['rows']), 8)
+
 
             finally:
                 server.shutdown(); server.server_close(); thread.join()

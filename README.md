@@ -22,7 +22,7 @@ Abra **http://127.0.0.1:8000** no navegador. Para encerrar, pressione Ctrl+C no 
 
 ## Como usar
 
-1. Clique em **Importar fatura** e escolha PDF, CSV, Excel ou uma imagem PNG/JPG/WebP.
+1. Clique em **Importar fatura** e selecione até 20 arquivos PDF, CSV, Excel ou imagens PNG/JPG/WebP de uma vez (Ctrl ou Shift na janela de arquivos). Cada arquivo pode ter até 10 MB. Todos serão associados ao mês escolhido. A senha informada é aplicada a todos os PDFs; para senhas diferentes, faça importações separadas. A revisão identifica o arquivo de cada lançamento. Falhas são informadas por arquivo, e somente os arquivos lidos e revisados são salvos. A confirmação salva o lote em uma única operação; se houver erro ao salvar, nenhum arquivo do lote é gravado.
 2. Se o PDF for protegido, informe a senha no campo indicado. Ela é usada somente para leitura, não é salva e não é enviada à IA. Clique em **Ler e categorizar**. Confira a quantidade, o total e as compras encontradas com sua fatura original.
 3. Escolha o mês e o ano na tela de upload. Confira datas, descrições, valores e categorias; corrija, remova ou adicione linhas antes de confirmar.
 4. Clique na categoria para alterar; para várias despesas, selecione as caixas e use **Aplicar à seleção**. As correções passam a ser lembradas para futuras importações do mesmo estabelecimento, inclusive correções de categoria feitas na conferência do upload. A última preferência substitui a anterior. A comparação ignora acentos, maiúsculas, espaços extras e o número da parcela no formato “Parcela 01 de 04”; nomes diferentes podem exigir nova correção.

@@ -385,19 +385,23 @@ class Handler(BaseHTTPRequestHandler):
                     if key in memory:
                         row.update(category=memory[key], source='Sua preferência')
                 return self.send({'rows': rows, 'hash': digest, 'file_name': re.split(r'[/\\]', data['name'])[-1][:200], 'statement_month': metadata.get('statement_month') or '', 'warning': metadata.get('warning', '')})
-            if self.path == '/api/import':
-                rows, digest = data['rows'], data['hash']
-                month = valid_month(data.get('statement_month'), allow_empty=True)
-                if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest) or not 0 < len(rows) <= 2000:
-                    raise ValueError('Importação inválida.')
+            if self.path in ('/api/import', '/api/import-batch'):
+                files = data.get('files') if self.path.endswith('-batch') else [data]
+                if not isinstance(files, list) or not 1 <= len(files) <= 20:
+                    raise ValueError('Selecione entre 1 e 20 arquivos.')
                 with connect() as con:
-                    con.execute('INSERT INTO imports (hash, statement_month, file_name) VALUES (?,?,?)', (digest, month, str(data.get('file_name', 'Fatura importada'))[:200]))
-                    for i, row in enumerate(rows):
-                        if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
-                            raise ValueError('Lançamento inválido.')
-                        con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
-                        if row.get('category_corrected'):
-                            remember(con, row['description'], row['category'])
+                    for file in files:
+                        rows, digest = file['rows'], file['hash']
+                        month = valid_month(file.get('statement_month'), allow_empty=True)
+                        if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest) or not isinstance(rows, list) or not 0 < len(rows) <= 2000:
+                            raise ValueError('Importação inválida.')
+                        con.execute('INSERT INTO imports (hash, statement_month, file_name) VALUES (?,?,?)', (digest, month, str(file.get('file_name', 'Fatura importada'))[:200]))
+                        for i, row in enumerate(rows):
+                            if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
+                                raise ValueError('Lançamento inválido.')
+                            con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
+                            if row.get('category_corrected'):
+                                remember(con, row['description'], row['category'])
                 return self.send({'ok': True})
             if self.path == '/api/delete-month':
                 if 'statement_month' not in data:
