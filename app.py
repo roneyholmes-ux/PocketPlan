@@ -310,6 +310,7 @@ def connect():
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     con.execute('CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, date TEXT, description TEXT, cents INTEGER, category TEXT, source TEXT, file_hash TEXT)')
+    con.execute('CREATE TABLE IF NOT EXISTS custom_categories (name TEXT PRIMARY KEY, normalized TEXT UNIQUE)')
     con.execute('CREATE TABLE IF NOT EXISTS category_memory (merchant TEXT PRIMARY KEY, category TEXT NOT NULL)')
     con.execute('CREATE TABLE IF NOT EXISTS imports (hash TEXT PRIMARY KEY)')
     if 'statement_month' not in [r[1] for r in con.execute('PRAGMA table_info(imports)')]:
@@ -321,6 +322,12 @@ def connect():
             yield con
     finally:
         con.close()
+
+def categories(con=None):
+    if con is None:
+        with connect() as db:
+            return categories(db)
+    return CATEGORIES + [r[0] for r in con.execute('SELECT name FROM custom_categories ORDER BY rowid')] + [PENDING]
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -339,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
             with connect() as con:
                 rows = [dict(r) for r in con.execute('SELECT e.*, i.statement_month FROM expenses e LEFT JOIN imports i ON i.hash=e.file_hash ORDER BY e.date DESC, e.id')]
                 imports = [dict(r) for r in con.execute('SELECT hash, statement_month, file_name FROM imports ORDER BY statement_month DESC, rowid DESC')]
-            return self.send({'rows': rows, 'imports': imports, 'ai': bool(os.environ.get('OPENAI_API_KEY'))})
+            return self.send({'rows': rows, 'imports': imports, 'categories': categories(), 'ai': bool(os.environ.get('OPENAI_API_KEY'))})
         paths = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/filters.js': ('filters.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if self.path not in paths:
             return self.send({'error': 'Não encontrado.'}, 404)
@@ -397,7 +404,7 @@ class Handler(BaseHTTPRequestHandler):
                             raise ValueError('Importação inválida.')
                         con.execute('INSERT INTO imports (hash, statement_month, file_name) VALUES (?,?,?)', (digest, month, str(file.get('file_name', 'Fatura importada'))[:200]))
                         for i, row in enumerate(rows):
-                            if row['category'] not in CATEGORIES + [PENDING] or type(row['cents']) is not int or not str(row['description']).strip():
+                            if row['category'] not in categories(con) or type(row['cents']) is not int or not str(row['description']).strip():
                                 raise ValueError('Lançamento inválido.')
                             con.execute('INSERT INTO expenses VALUES (?,?,?,?,?,?,?)', (digest + ':' + str(i), date_iso(row['date']), str(row['description'])[:300], row['cents'], row['category'], row.get('source', 'Manual'), digest))
                             if row.get('category_corrected'):
@@ -419,8 +426,21 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as con:
                     con.executemany('UPDATE imports SET statement_month=? WHERE hash=?', [(month, h) for h in hashes])
                 return self.send({'ok': True})
+            if self.path == '/api/categories':
+                name = data.get('name')
+                if not isinstance(name, str) or not 1 <= len(name.strip()) <= 50 or any(ord(c) < 32 for c in name):
+                    raise ValueError('Use um nome de categoria entre 1 e 50 caracteres.')
+                name = ' '.join(name.split())
+                with connect() as con:
+                    existing = next((c for c in categories(con) if normalize(c) == normalize(name)), None)
+                    if existing:
+                        name = existing
+                    else:
+                        con.execute('INSERT INTO custom_categories VALUES (?,?)', (name, normalize(name)))
+                    available = categories(con)
+                return self.send({'name': name, 'categories': available})
             if self.path == '/api/category':
-                if data['category'] not in CATEGORIES + [PENDING]:
+                if data['category'] not in categories():
                     raise ValueError('Categoria inválida.')
                 if not isinstance(data['ids'], list) or len(data['ids']) > 2000:
                     raise ValueError('Seleção inválida.')

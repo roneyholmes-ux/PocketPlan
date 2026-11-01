@@ -31,7 +31,13 @@ Abra **http://127.0.0.1:8000** no navegador. Para encerrar, pressione Ctrl+C no 
 
 Categorias: **Lazer, Mercado, Despesa Médica e Casa**. **A revisar** é uma indicação de dúvida, para não forçar uma classificação incorreta. Créditos e estornos aparecem negativos e reduzem o total. O mesmo arquivo não pode ser importado novamente; arquivos diferentes que contenham as mesmas compras exigem conferência para evitar duplicação.
 
+## Categorias personalizadas
+
+No seletor de categoria de qualquer lançamento, escolha **Criar nova categoria…**, informe o nome e confirme. Ela é salva no computador, aplicada ao lançamento e fica disponível nos filtros, resumos e próximas correções. Nomes repetidos reutilizam a categoria existente.
+
 ## Calendário de gastos
+
+Clique no calendário ou em **Ampliar** para abrir uma visualização maior, com o fundo desfocado. Os filtros continuam funcionando. Feche pelo ×, pela tecla Esc ou clicando fora da janela.
 
 À direita, o calendário soma as compras positivas por dia, usando a data original. Use **Tipo de gasto** no próprio calendário para escolher a categoria. Esse filtro é independente do filtro da tabela: altera apenas os dias e a escala de cores do calendário. Cinza indica zero; verde claro a escuro indica valores crescentes em cinco faixas proporcionais ao maior total diário exibido. Clique em um dia para consultar seu total. Estornos não entram nas cores.
 

@@ -187,6 +187,13 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(len(call('expenses')['rows']), 4)
                 call('import-batch', {'files': [first, second]})
                 self.assertEqual(len(call('expenses')['rows']), 8)
+                created=call('categories', {'name':'Transporte'})
+                self.assertIn('Transporte', created['categories'])
+                self.assertEqual(call('categories', {'name':' transporte '})['name'], 'Transporte')
+                call('category', {'ids':[rows[0]['id']], 'category':'Transporte'})
+                self.assertIn('Transporte', call('expenses')['categories'])
+                self.assertEqual(next(r for r in call('expenses')['rows'] if r['id']==rows[0]['id'])['category'], 'Transporte')
+
                 with self.assertRaises(HTTPError) as duplicate_batch:
                     call('import-batch', {'files': [{**first, 'hash': 'd'*64}, second]})
                 self.assertEqual(duplicate_batch.exception.code, 409)
