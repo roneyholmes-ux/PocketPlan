@@ -39,17 +39,17 @@ $('addRow').onclick=()=>{if(!draft)return;draft.rows.push({file_hash:draft.files
 async function previewFile(file){return previewFiles([file]);}
 async function previewFiles(files){
  resetDraft();if(files.length>20){$('importStatus').textContent='Selecione até 20 arquivos por vez.';return;}
- busy=true;['read','file','ai','password'].forEach(id=>$(id).disabled=true);
+ busy=true;$('processing').hidden=false;$('importDialog').setAttribute('aria-busy','true');$('processingProgress').max=files.length;$('processingProgress').value=0;$('read').textContent='Processando…';['read','file','ai','password'].forEach(id=>$(id).disabled=true);
  const password=$('password').value,useAI=$('ai').checked,accepted=[],messages=[];
  try{for(let i=0;i<files.length;i++){
-  const file=files[i];$('importStatus').textContent='Lendo '+(i+1)+' de '+files.length+': '+file.name;
+  const file=files[i];$('processingTitle').textContent='Processando arquivo '+(i+1)+' de '+files.length;$('processingFile').textContent=file.name;$('importStatus').textContent='Lendo '+(i+1)+' de '+files.length+': '+file.name;
   try{if(file.size>10000000)throw Error('O limite é de 10 MB por arquivo.');const buffer=new Uint8Array(await file.arrayBuffer());let binary='';for(let j=0;j<buffer.length;j+=8192)binary+=String.fromCharCode(...buffer.subarray(j,j+8192));
    const item=await api('preview',{name:file.name,content:btoa(binary),password,ai:useAI});if(accepted.some(f=>f.hash===item.hash))throw Error('Arquivo repetido nesta seleção.');accepted.push(item);messages.push(file.name+': '+item.rows.length+' lançamentos.'+(item.warning?' '+item.warning:''));
-  }catch(e){messages.push(file.name+': NÃO incluído — '+e.message);}
+  }catch(e){messages.push(file.name+': NÃO incluído — '+e.message);}finally{$('processingProgress').value=i+1;}
  }
  if(accepted.length){draft={files:accepted,rows:accepted.flatMap(f=>f.rows.map(r=>({...r,file_hash:f.hash})))};renderPreview();$('preview').hidden=false;}
  $('importStatus').textContent=accepted.length+' de '+files.length+' arquivos prontos para revisão. '+messages.join(' | ');
- }finally{busy=false;['read','file','password'].forEach(id=>$(id).disabled=false);$('password').value='';$('ai').disabled=!$('aiStatus').textContent.startsWith('configurada');}
+ }finally{busy=false;$('processing').hidden=true;$('importDialog').setAttribute('aria-busy','false');$('read').textContent='Ler e categorizar';['read','file','password'].forEach(id=>$(id).disabled=false);$('password').value='';$('ai').disabled=!$('aiStatus').textContent.startsWith('configurada');}
 }
 $('read').onclick=()=>{const files=[...$('file').files];if(!files.length){$('importStatus').textContent='Selecione uma ou mais faturas primeiro.';return;}previewFiles(files);};
 $('save').onclick=async()=>{if(!draft)return;try{draft.statement_month=monthValue($('statementMonth').value);if(!draft.rows.length)throw Error('Adicione pelo menos um lançamento.');draft.rows.forEach((r,i)=>{if(!r.date||!r.description.trim())throw Error('Confira a data e a descrição do lançamento '+(i+1)+'.');const c=PocketFilters.cents(r.amountText??String(r.cents/100));if(c===null)throw Error('Informe o valor do lançamento '+(i+1)+'.');r.cents=c;});}catch(e){$('importStatus').textContent=e.message;$('statementMonth').focus();return;}$('save').disabled=true;try{await api('import-batch',{files:draft.files.map(f=>({...f,statement_month:draft.statement_month,rows:draft.rows.filter(r=>r.file_hash===f.hash)})).filter(f=>f.rows.length)});activeMonth=draft.statement_month||'unassigned';resetDraft();$('file').value='';$('importDialog').close();await load();toast('Arquivos importados. Você já pode ajustar as categorias.');}catch(e){$('importStatus').textContent=e.message;}finally{$('save').disabled=false;}};
